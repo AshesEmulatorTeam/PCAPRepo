@@ -227,26 +227,47 @@ def is_skill_ability(words: List[str]) -> bool:
     return bool(set(words) & skill_words)
 
 
-def categorize_file(filename: str, existing_folders: List[str]) -> List[str]:
+def categorize_file(filename: str, existing_folders: List[str], metadata: Optional[dict] = None) -> List[str]:
     """
     Figure out where this file should go.
     Returns list of folder parts, e.g., ['combat', 'pvp', 'tank']
     """
     # STEP 1: Check if it matches an existing folder
     existing_match = matches_existing_folder(filename, existing_folders)
+    # If we have explicit metadata (capture target / player class) prefer
+    # using that information instead of blindly matching existing folders.
     if existing_match:
-        return existing_match.split('/')
+        if not metadata or not (metadata.get('capture target') or metadata.get('capture_target') or metadata.get('player class') or metadata.get('player_class')):
+            return existing_match.split('/')
     
-    # STEP 2: Analyze the filename
+    # STEP 2: Analyze the filename and optional metadata
     words = get_words(filename)
+    # If metadata includes a capture target or player class, merge those words
+    if metadata:
+        # Capture Target can suggest system/subcategory
+        ct = metadata.get('capture target') or metadata.get('capture_target')
+        if ct:
+            words = words + get_words(ct)
+        # Player Class can suggest archetype
+        pc = metadata.get('player class') or metadata.get('player_class')
+        if pc:
+            words = words + get_words(pc)
     
     if not words:
         return ['unsortable']
     
     path_parts = []
     
-    # Detect game system
-    system_info = detect_system(words)
+    # If metadata explicitly gave a capture target, try to use it first
+    system_info = None
+    if metadata:
+        ct = metadata.get('capture target') or metadata.get('capture_target')
+        if ct:
+            system_info = detect_system(get_words(ct))
+
+    # Fallback to words from filename+metadata
+    if not system_info:
+        system_info = detect_system(words)
     if system_info:
         system_name, subcategory = system_info
         path_parts.append(system_name)
@@ -254,7 +275,19 @@ def categorize_file(filename: str, existing_folders: List[str]) -> List[str]:
             path_parts.append(subcategory)
     
     # Detect archetype (for combat/skills)
-    archetype = detect_archetype(words)
+    # Archetype: prefer explicit player class metadata
+    archetype = None
+    if metadata:
+        pc = metadata.get('player class') or metadata.get('player_class')
+        if pc:
+            # normalize and try to find archetype/class names
+            pc_words = get_words(pc)
+            archetype = detect_archetype(pc_words)
+
+    # fallback to detection from filename/words
+    if not archetype:
+        archetype = detect_archetype(words)
+
     if archetype and (not path_parts or path_parts[0] == 'combat'):
         if not path_parts:
             path_parts = ['combat']
@@ -290,6 +323,37 @@ def get_new_filename(original: str, path_parts: List[str]) -> str:
             base = f"skill_{base}"
     
     return f"{base}{ext}"
+
+
+def parse_file_header(path: Path) -> dict:
+    """Read the start of a file for '# Key: Value' style metadata.
+
+    Returns a dict with lowercased keys (e.g. 'player class', 'capture target').
+    Safe for binary PCAP/PCAPNG files: reads a few KB and decodes ignoring errors.
+    """
+    meta = {}
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read(8192)
+            text = raw.decode('utf-8', errors='ignore')
+    except Exception:
+        return meta
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith('#'):
+            s = s.lstrip('#').strip()
+            if ':' in s:
+                k, v = s.split(':', 1)
+                meta[k.strip().lower()] = v.strip()
+        # stop after a short header block (avoid scanning whole file)
+        # treat a non-comment line after comments as end of header
+        elif meta:
+            break
+
+    return meta
 
 
 def scan_existing_folders(root: Path) -> List[str]:
@@ -410,8 +474,11 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
     for src_file in pcap_files:
         filename = src_file.name
         
-        # Categorize
-        path_parts = categorize_file(filename, existing_folders)
+        # Try to parse an in-file header for extra metadata (player class, capture target)
+        metadata = parse_file_header(src_file)
+
+        # Categorize (use metadata when available)
+        path_parts = categorize_file(filename, existing_folders, metadata)
         
         # Build destination
         dest_dir = root
