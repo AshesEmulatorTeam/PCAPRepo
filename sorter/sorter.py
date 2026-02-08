@@ -227,16 +227,16 @@ def is_skill_ability(words: List[str]) -> bool:
     return bool(set(words) & skill_words)
 
 
-def categorize_file(filename: str, existing_folders: List[str], metadata: Optional[dict] = None) -> List[str]:
+def categorize_file(filename: str, existing_folders: List[str], metadata: Optional[dict] = None, prefer_existing: bool = True) -> List[str]:
     """
     Figure out where this file should go.
     Returns list of folder parts, e.g., ['combat', 'pvp', 'tank']
     """
     # STEP 1: Check if it matches an existing folder
     existing_match = matches_existing_folder(filename, existing_folders)
-    # If we have explicit metadata (capture target / player class) prefer
-    # using that information instead of blindly matching existing folders.
-    if existing_match:
+    # If we have an existing folder match, prefer it only when allowed
+    # and when we don't have explicit metadata that should override it.
+    if existing_match and prefer_existing:
         if not metadata or not (metadata.get('capture target') or metadata.get('capture_target') or metadata.get('player class') or metadata.get('player_class')):
             return existing_match.split('/')
     
@@ -422,20 +422,13 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
         search_path = root / 'Needs Sorting'
         if not search_path.exists():
             search_path.mkdir(parents=True, exist_ok=True)
-            print(f"✅ Created 'Needs Sorting' folder: {search_path}")
-            print(f"📥 Drop your PCAPs here and run again!")
+            print(f"Created 'Needs Sorting' folder: {search_path}")
+            print(f"Drop your PCAPs here and run again!")
             return
-        print(f"📂 Processing: {search_path}")
+        print(f"Processing: {search_path}")
     
     # Scan existing folder structure
-    print(f"🔍 Scanning existing folders...")
     existing_folders = scan_existing_folders(root)
-    if existing_folders:
-        print(f"📁 Found {len(existing_folders)} existing folders")
-        for folder in sorted(existing_folders[:5]):
-            print(f"   - {folder}")
-        if len(existing_folders) > 5:
-            print(f"   ... and {len(existing_folders) - 5} more")
     
     print()
     print("="*60)
@@ -463,8 +456,7 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
             else:
                 pcap_files.append(file_path)
     
-    print(f"📊 Found {len(pcap_files)} PCAP files to process")
-    print()
+    print(f"Found {len(pcap_files)} files to process")
     
     # Process each file
     moved = 0
@@ -477,8 +469,9 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
         # Try to parse an in-file header for extra metadata (player class, capture target)
         metadata = parse_file_header(src_file)
 
-        # Categorize (use metadata when available)
-        path_parts = categorize_file(filename, existing_folders, metadata)
+        # Categorize (use metadata when available). When reorganizing we must
+        # re-evaluate files by name rather than trusting existing folders.
+        path_parts = categorize_file(filename, existing_folders, metadata, prefer_existing=(not reorganize))
         
         # Build destination
         dest_dir = root
@@ -501,19 +494,13 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
         if is_unsortable:
             unsortable += 1
         
-        # Show what we're doing
         if dry_run:
-            icon = "⚠️ " if is_unsortable else "🔍"
-            print(f"{icon} {src_file.relative_to(root)}")
-            print(f"   → {dest_file.relative_to(root)}")
+            print(f"{src_file.relative_to(root)} -> {dest_file.relative_to(root)}")
             if is_unsortable:
-                print(f"   (couldn't categorize - rename with better keywords)")
+                print(f"Couldn't categorize: rename with better keywords")
             moved += 1
         else:
-            # Create destination directory
             dest_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Handle duplicates
             final_dest = dest_file
             if final_dest.exists():
                 counter = 1
@@ -522,18 +509,14 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
                     if not final_dest.exists():
                         break
                     counter += 1
-            
-            # Move it!
             try:
                 shutil.move(str(src_file), str(final_dest))
-                icon = "⚠️ " if is_unsortable else "✅"
-                print(f"{icon} {src_file.relative_to(root)}")
-                print(f"   → {final_dest.relative_to(root)}")
+                print(f"Moved: {src_file.relative_to(root)} -> {final_dest.relative_to(root)}")
                 if is_unsortable:
-                    print(f"   (couldn't categorize - please review!)")
+                    print(f"Couldn't categorize: please review!")
                 moved += 1
             except Exception as e:
-                print(f"❌ Failed to move {filename}: {e}")
+                print(f"Failed to move {filename}: {e}")
     
     # After processing, any remaining files still inside any 'Needs Sorting'
     # directories should be moved to an 'unsortable' folder so nothing is
@@ -555,14 +538,12 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
     if remaining_in_needs:
         unsort_dir = root / 'unsortable'
         if dry_run:
-            print()
-            print("⚠️ Remaining files in 'Needs Sorting' (dry-run):")
+            print("Remaining files in 'Needs Sorting':")
             for f in remaining_in_needs:
-                print(f"   - {f.relative_to(root)} -> {unsort_dir.relative_to(root)}/{f.name}")
+                print(f"{f.relative_to(root)} -> {unsort_dir.relative_to(root)}/{f.name}")
         else:
             unsort_dir.mkdir(parents=True, exist_ok=True)
-            print()
-            print("⚠️ Moving leftover files from 'Needs Sorting' to 'unsortable/'")
+            print("Moving leftover files from 'Needs Sorting' to 'unsortable/'")
             for f in remaining_in_needs:
                 final = unsort_dir / f.name
                 if final.exists():
@@ -574,42 +555,25 @@ def organize_pcaps(root: Path, dry_run: bool = False, reorganize: bool = False):
                         counter += 1
                 try:
                     shutil.move(str(f), str(final))
-                    print(f"   → {f.relative_to(root)} -> {final.relative_to(root)}")
+                    print(f"Moved: {f.relative_to(root)} -> {final.relative_to(root)}")
                     moved += 1
                 except Exception as e:
-                    print(f"   ❌ Failed to move leftover {f.name}: {e}")
+                    print(f"Failed to move leftover {f.name}: {e}")
 
-    # Clean up empty folders
     if not dry_run and moved > 0:
-        print()
-        print("="*60)
-        print("🧹 Cleaning up empty directories...")
         deleted = remove_empty_dirs(root, search_path)
         if deleted:
             for d in deleted:
-                print(f"🗑️  Deleted empty: {d}")
-    
-    # Summary
-    print()
-    print("="*60)
+                print(f"Deleted empty: {d}")
+
     if dry_run:
-        print("🔍 DRY RUN COMPLETE")
-        print(f"   Would move: {moved} files")
-        print(f"   Would skip: {skipped} files")
+        print(f"Dry run complete. Would move: {moved} files. Would skip: {skipped} files.")
         if unsortable > 0:
-            print(f"   ⚠️  Unsortable: {unsortable} files")
-            print(f"   💡 Tip: Rename with AoC keywords (tank, caravan, node, etc.)")
+            print(f"Unsortable: {unsortable} files. Rename with AoC keywords (tank, caravan, node, etc.)")
     else:
-        print("✅ ORGANIZATION COMPLETE")
-        print(f"   Moved: {moved} files")
-        print(f"   Skipped: {skipped} files")
+        print(f"Organization complete. Moved: {moved} files. Skipped: {skipped} files.")
         if unsortable > 0:
-            print(f"   ⚠️  Unsortable: {unsortable} files → check 'unsortable/' folder")
-            print(f"   💡 Rename them and run again for proper categorization!")
-        
-        if moved > 0:
-            print()
-            print("✨ All done! Your PCAPs are organized! Thank the holy AI spirits! ✨")
+            print(f"Unsortable: {unsortable} files. Check 'unsortable/' folder. Rename and run again for proper categorization.")
 
 
 def main():
