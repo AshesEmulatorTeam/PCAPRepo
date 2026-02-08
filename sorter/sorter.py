@@ -69,6 +69,33 @@ CRAFTING_STATIONS = {
     'tannery', 'weaver', 'kiln', 'smelter',
 }
 
+# Known skill / ability names → combat_pve
+# These are cleric, mage, tank, ranger, etc. abilities that appear as filenames
+SKILL_NAMES = {
+    # Cleric
+    'smite', 'judgement', 'deliverance', 'condemn', 'consecrating', 'healing',
+    'mend', 'flash', 'purify', 'resplendent', 'soothing', 'barrier',
+    'defiant', 'divine', 'redemptive', 'unyielding', 'communal', 'plentiful',
+    'escalating', 'restorive', 'arcane', 'chains', 'binding', 'reprieve',
+    'wings', 'refreshing', 'essence', 'essense',
+    # Mage
+    'elemental', 'catalytic', 'focused', 'extra',
+    # Tank / Fighter / General
+    'recuperation', 'graceful', 'evasive', 'deadly',
+    # Generic augment words
+    'infusion', 'amplifier', 'restoration', 'salvation', 'maneuver',
+}
+
+# Known movement skill names → generic/movement
+MOVEMENT_SKILLS = {
+    'escape', 'sprint', 'second',  # escape_velocity, focused_sprint, second_wind
+}
+
+# Item quality prefixes (weapon/gear vendor items) → economy
+ITEM_QUALITY_PREFIXES = {
+    'rusty', 'crude', 'dull', 'musty', 'splintered', 'warped', 'adventures',
+}
+
 # ============================================================================
 # CAPTURE TARGET -> FOLDER RULES  (checked in order, first match wins)
 # ============================================================================
@@ -360,11 +387,16 @@ FILENAME_RULES = [
     (lambda fn, w: 'projectile' in w and 'damage' in w, ['combat_pve']),
     (lambda fn, w: _has_any(w, 'combofull', 'combo') and not _has_any(w, 'caravan'), ['combat_pve']),
     (lambda fn, w: _has_any(w, 'empowered', 'righteous', 'ward', 'fortification',
-                             'smite', 'bless', 'blessed'), ['combat_pve']),
+                             'bless', 'blessed'), ['combat_pve']),
     (lambda fn, w: 'looting' in w, ['combat_pve']),
     (lambda fn, w: _has_any(w, 'axe', 'sword', 'greatsword', 'bow', 'longbow', 'shortbow',
                              'dagger', 'daggers', 'mace', 'rapier', 'wand', 'spellbook',
                              'focus') and detect_archetype(w) is not None, ['combat_pve']),
+    # Known skill/ability names (cleric heals, mage augments, etc.)
+    (lambda fn, w: bool(w & SKILL_NAMES), ['combat_pve']),
+    # Standalone ability files: proc_*, duration_*, chance_*, ext_*
+    (lambda fn, w: _has_any(w, 'proc', 'duration', 'chance', 'ext') and _has_any(w, 'damage', 'finisher', 'dmg', 'duration', 'stack'), ['combat_pve']),
+    (lambda fn, w: fn.startswith('proc_') or fn.startswith('duration_') or fn.startswith('chance_') or fn.startswith('ext_'), ['combat_pve']),
     (lambda fn, w: 'switch' in w and 'weapon' in w, ['ui_inventory_management', 'equip_unequip']),
     (lambda fn, w: 'items' in w and _has_any(w, 'unequipped', 'uneqipped', 'equipped'), ['ui_inventory_management']),
     (lambda fn, w: 'putting' in w and 'item' in w, ['economy']),
@@ -382,12 +414,23 @@ FILENAME_RULES = [
     (lambda fn, w: 'server' in w and 'worker' in w, ['server_workers']),
 
     # =====================================================================
-    # 22. OCEAN / NAVAL
+    # 22. MOVEMENT SKILLS (escape velocity, evasive maneuver, second wind, focused sprint)
     # =====================================================================
-    (lambda fn, w: _has_any(w, 'ocean', 'naval'), ['ocean']),
+    (lambda fn, w: bool(w & MOVEMENT_SKILLS), ['generic', 'movement']),
+    (lambda fn, w: _has_any(w, 'velocity', 'wind') and _has_any(w, 'escape', 'second'), ['generic', 'movement']),
 
     # =====================================================================
-    # 23. GENERIC UI
+    # 23. ITEM QUALITY / WEAPON VENDOR ITEMS (rusty, crude, dull, etc.)
+    # =====================================================================
+    (lambda fn, w: bool(w & ITEM_QUALITY_PREFIXES), ['economy']),
+
+    # =====================================================================
+    # 24. OCEAN / NAVAL
+    # =====================================================================
+    (lambda fn, w: _has_any(w, 'ocean', 'naval', 'safezone'), ['ocean']),
+
+    # =====================================================================
+    # 25. GENERIC UI
     # =====================================================================
     (lambda fn, w: 'respawn' in w, ['generic']),
     (lambda fn, w: 'load' in w and 'screen' in w, ['generic']),
@@ -397,15 +440,17 @@ FILENAME_RULES = [
     (lambda fn, w: 'dying' in w or 'death' in w, ['generic']),
     (lambda fn, w: 'loggin' in fn or 'logging_in' in fn, ['generic']),
     (lambda fn, w: fn.startswith('aoc_action_') and 'mount' not in w, ['generic']),
+    (lambda fn, w: _has_any(w, 'desktop', 'ashesfinalui'), ['generic']),
 
     # =====================================================================
-    # 24. MATERIAL VALUE FILES (color + value → world_gathering)
+    # 26. MATERIAL VALUE FILES (color + value → world_gathering)
     # =====================================================================
     (lambda fn, w: bool(w & MATERIALS) and _has_any(w, 'blue', 'green', 'grey', 'purple', 'white'), ['world_gathering']),
     (lambda fn, w: bool(w & MATERIALS) and 'sand' in w, ['world_processing']),
+    (lambda fn, w: bool(w & MATERIALS), ['world_gathering']),
 
     # =====================================================================
-    # 25. PLAYER-GENERIC ACTIONS (last resort)
+    # 27. PLAYER-GENERIC ACTIONS (last resort)
     # =====================================================================
     (lambda fn, w: fn.startswith('player_') and _has_any(w, 'harvest', 'start'), ['world_gathering']),
     (lambda fn, w: fn.startswith('player_') and _has_any(w, 'vendor', 'buy'), ['economy']),
@@ -414,7 +459,7 @@ FILENAME_RULES = [
     (lambda fn, w: fn.startswith('player_') and 'put' in w and 'storage' in w, ['ui_inventory_management']),
 
     # =====================================================================
-    # 26. BEING INVITED (social action, not combat)
+    # 28. BEING INVITED (social action, not combat)
     # =====================================================================
     (lambda fn, w: 'being' in w and 'invited' in w, ['guild_management']),
     (lambda fn, w: 'retrieving' in w and _has_any(w, 'silver', 'gold'), ['economy']),
