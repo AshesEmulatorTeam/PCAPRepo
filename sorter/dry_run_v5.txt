@@ -1,0 +1,10 @@
+﻿============================================================
+Ashes of Creation PCAP Organizer
+============================================================
+Root: C:\Users\daand\Documents\pcaps\PCAPRepo
+Mode: DRY RUN
+============================================================
+Reorganizing: C:\Users\daand\Documents\pcaps\PCAPRepo
+Found 1859 files
+
+DRY RUN: moved=0 skipped=1859 unsortable=0
