@@ -55,12 +55,14 @@ STOP_WORDS = {
     'ashes', 'creation', 'packet', 'value', 'value2', 'value5', 'value6',
 }
 
-# Known materials/resources in the game
+# Known materials/resources in the game (raw ores, gems, and alloys)
 MATERIALS = {
     'basalt', 'granite', 'iron', 'obsidian', 'sandstone', 'slate',
     'volcanic', 'volcanicrock', 'zinc', 'copper', 'tendonite', 'resonite',
     'saelacith', 'rough', 'roughseaglass', 'coveglass', 'deadcoral',
     'bagkindo', 'roughrime', 'tin',
+    # Alloys / processed metals
+    'brass', 'bronze', 'bulbore',
 }
 
 # Known crafting stations / NPC shop types
@@ -95,6 +97,20 @@ MOVEMENT_SKILLS = {
 ITEM_QUALITY_PREFIXES = {
     'rusty', 'crude', 'dull', 'musty', 'splintered', 'warped', 'adventures',
 }
+
+# Artisan gathering professions
+GATHERING_PROFESSIONS = {
+    'mining', 'herbalism', 'lumberjacking', 'hunting', 'fishing',
+}
+
+# Artisan processing professions
+PROCESSING_PROFESSIONS = {
+    'metalworking', 'stonemasonry', 'lumbermilling', 'tanning',
+    'weaving', 'alchemy', 'cooking', 'scribing',
+}
+
+# Combined set for quick lookups (includes alternate spellings)
+ALL_ARTISAN_PROFESSIONS = GATHERING_PROFESSIONS | PROCESSING_PROFESSIONS | {'scribe'}
 
 # ============================================================================
 # CAPTURE TARGET -> FOLDER RULES  (checked in order, first match wins)
@@ -173,33 +189,96 @@ def _has_any(w, *words):
 
 FILENAME_RULES = [
     # =====================================================================
-    # 1. PROCESSING (highest priority — before anything else)
+    # 0. ARTISAN PROFESSION RANK CHANGES (promote/demote)
+    #    Routes to artisan/gathering/{prof}/ or artisan/processing/{prof}/
+    #    Must be FIRST — "mining_promote" has "mining" which would match
+    #    gathering rules otherwise.
+    # =====================================================================
+    # Gathering professions
+    (lambda fn, w: 'mining' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'gathering', 'mining']),
+    (lambda fn, w: 'herbalism' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'gathering', 'herbalism']),
+    (lambda fn, w: 'lumberjacking' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'gathering', 'lumberjacking']),
+    (lambda fn, w: 'hunting' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'gathering', 'hunting']),
+    (lambda fn, w: 'fishing' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'gathering', 'fishing']),
+    # Processing professions
+    (lambda fn, w: 'metalworking' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'metalworking']),
+    (lambda fn, w: 'stonemasonry' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'stonemasonry']),
+    (lambda fn, w: 'lumbermilling' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'lumbermilling']),
+    (lambda fn, w: 'weaving' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'weaving']),
+    (lambda fn, w: 'alchemy' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'alchemy']),
+    (lambda fn, w: _has_any(w, 'scribe', 'scribing') and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'scribing']),
+    (lambda fn, w: 'tanning' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'tanning']),
+    (lambda fn, w: 'cooking' in w and _has_any(w, 'promote', 'demote'), ['artisan', 'processing', 'cooking']),
+
+    # =====================================================================
+    # 1a. PROCESSING — smelting (ingots, fragments, powder, charcoal)
+    # =====================================================================
+    (lambda fn, w: 'ingot' in w and _has_any(w, 'process', 'processing', 'claim', 'craft', 'smelt', 'smelting'), ['world_processing', 'smelting']),
+    (lambda fn, w: 'ingot' in w and _has_any(w, *MATERIALS), ['world_processing', 'smelting']),
+    (lambda fn, w: 'fragment' in w and _has_any(w, 'process', 'processing', 'claim', 'craft'), ['world_processing', 'smelting']),
+    (lambda fn, w: 'powder' in w and _has_any(w, 'process', 'processing', 'claim', 'craft'), ['world_processing', 'smelting']),
+    (lambda fn, w: 'charcoal' in w, ['world_processing', 'smelting']),
+
+    # =====================================================================
+    # 1b. PROCESSING — stonemasonry (sand, ashlar, sanding)
+    # =====================================================================
+    (lambda fn, w: _has_any(w, 'sand', 'sanding') and _has_any(w, 'processing', 'process', 'claim', 'sanding'), ['world_processing', 'stonemasonry']),
+    (lambda fn, w: 'sanding' in w, ['world_processing', 'stonemasonry']),
+    (lambda fn, w: 'ashlarblock' in fn or 'ashlarblock' in w, ['world_processing', 'stonemasonry']),
+    (lambda fn, w: 'stonemason' in w, ['world_processing', 'stonemasonry']),
+
+    # =====================================================================
+    # 1c. PROCESSING — lumbermilling
+    # =====================================================================
+    (lambda fn, w: 'lumbermilling' in w and not _has_any(w, 'promote', 'demote'), ['world_processing', 'lumbermilling']),
+    (lambda fn, w: fn.startswith('processing_lumbermilling'), ['world_processing', 'lumbermilling']),
+
+    # =====================================================================
+    # 1d. PROCESSING — tanning
+    # =====================================================================
+    (lambda fn, w: 'tanning' in w and not _has_any(w, 'promote', 'demote'), ['world_processing', 'tanning']),
+    (lambda fn, w: fn.startswith('processing_tanning'), ['world_processing', 'tanning']),
+
+    # =====================================================================
+    # 1e. PROCESSING — scribing (ink, scrolls)
+    # =====================================================================
+    (lambda fn, w: 'ink' in w and _has_any(w, 'claim', 'craft', 'process', 'processing'), ['world_processing', 'scribing']),
+
+    # =====================================================================
+    # 1f. PROCESSING — cooking (fruit salad, food items)
+    # =====================================================================
+    (lambda fn, w: 'fruit' in w and 'salad' in w, ['world_processing', 'cooking']),
+
+    # =====================================================================
+    # 1g. PROCESSING — metalworking (armor plating, alloy work)
+    # =====================================================================
+    (lambda fn, w: 'metalworking' in w and not _has_any(w, 'promote', 'demote'), ['world_processing', 'metalworking']),
+    (lambda fn, w: 'plating' in w and _has_any(w, 'claim', 'craft', 'process'), ['world_processing', 'metalworking']),
+
+    # =====================================================================
+    # 1h. PROCESSING — generic catch-all (remaining processing files)
     # =====================================================================
     (lambda fn, w: 'processing' in w, ['world_processing']),
     (lambda fn, w: fn.startswith('processing_'), ['world_processing']),
-    (lambda fn, w: '_sand_processing' in fn, ['world_processing']),
-    (lambda fn, w: '_fragment_craft' in fn, ['world_processing']),
-    (lambda fn, w: '_powder_craft' in fn, ['world_processing']),
-    (lambda fn, w: '_ashlarblock' in fn or 'ashlarblock' in w, ['world_processing']),
-    (lambda fn, w: 'stonemason' in w, ['world_processing']),
-    (lambda fn, w: 'metalworking' in w, ['world_processing']),
 
     # =====================================================================
-    # 2. CLAIM (resource/node claims → world_processing)
+    # 2. CLAIM (material claims not caught by specific processing rules)
     # =====================================================================
     (lambda fn, w: 'claim' in w and _has_any(w, *MATERIALS), ['world_processing']),
-    (lambda fn, w: '_sand_claim' in fn, ['world_processing']),
-    (lambda fn, w: '_fragment_claim' in fn, ['world_processing']),
 
     # =====================================================================
-    # 3. GATHERING
+    # 3. GATHERING — with profession subcategories
     # =====================================================================
+    (lambda fn, w: fn.startswith('gathering_mining') or ('gathering' in w and 'mining' in w), ['world_gathering', 'mining']),
+    (lambda fn, w: fn.startswith('gathering_herbalism') or ('gathering' in w and 'herbalism' in w), ['world_gathering', 'herbalism']),
+    (lambda fn, w: fn.startswith('gathering_lumberjacking') or ('gathering' in w and 'lumberjacking' in w), ['world_gathering', 'lumberjacking']),
+    (lambda fn, w: fn.startswith('gathering_hunting') or ('gathering' in w and 'hunting' in w), ['world_gathering', 'hunting']),
     (lambda fn, w: 'gathering' in w, ['world_gathering']),
     (lambda fn, w: fn.startswith('gather_'), ['world_gathering']),
     (lambda fn, w: fn.startswith('gathering_'), ['world_gathering']),
-    (lambda fn, w: 'harvest' in w and 'tree' in w, ['world_gathering']),
-    (lambda fn, w: 'chopping' in w, ['world_gathering']),
-    (lambda fn, w: 'coconut' in w and 'tree' in w, ['world_gathering']),
+    (lambda fn, w: 'harvest' in w and 'tree' in w, ['world_gathering', 'lumberjacking']),
+    (lambda fn, w: 'chopping' in w, ['world_gathering', 'lumberjacking']),
+    (lambda fn, w: 'coconut' in w and 'tree' in w, ['world_gathering', 'lumberjacking']),
 
     # =====================================================================
     # 4. FISHING
@@ -445,8 +524,9 @@ FILENAME_RULES = [
     # =====================================================================
     # 26. MATERIAL VALUE FILES (color + value → world_gathering)
     # =====================================================================
-    (lambda fn, w: bool(w & MATERIALS) and _has_any(w, 'blue', 'green', 'grey', 'purple', 'white'), ['world_gathering']),
-    (lambda fn, w: bool(w & MATERIALS) and 'sand' in w, ['world_processing']),
+    (lambda fn, w: bool(w & MATERIALS) and _has_any(w, 'blue', 'green', 'grey', 'purple', 'white', 'yellow'), ['world_gathering']),
+    (lambda fn, w: bool(w & MATERIALS) and 'sand' in w, ['world_processing', 'stonemasonry']),
+    (lambda fn, w: bool(w & MATERIALS) and _has_any(w, 'ingot', 'fragment', 'powder'), ['world_processing', 'smelting']),
     (lambda fn, w: bool(w & MATERIALS), ['world_gathering']),
 
     # =====================================================================
@@ -465,7 +545,6 @@ FILENAME_RULES = [
     (lambda fn, w: 'retrieving' in w and _has_any(w, 'silver', 'gold'), ['economy']),
     (lambda fn, w: 'npc_interaction' in fn or ('npc' in w and 'interaction' in w), ['world_npc_interaction']),
     (lambda fn, w: 'changing' in w and 'mayor' in fn, ['nodes']),
-    (lambda fn, w: 'fruit' in w and 'salad' in w, ['world_processing']),
 ]
 
 
