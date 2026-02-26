@@ -1,0 +1,3 @@
+#!/usr/bin/env text
+# Misplaced file: name indicates 'knight' but located under 'cleric'
+kill_aoc_knight.pcap
